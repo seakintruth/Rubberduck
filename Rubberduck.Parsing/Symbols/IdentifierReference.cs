@@ -22,69 +22,53 @@ namespace Rubberduck.Parsing.Symbols
             Declaration declaration, 
             bool isAssignmentTarget = false,
             bool hasExplicitLetStatement = false, 
-            IEnumerable<IAnnotation> annotations = null)
+            IEnumerable<IAnnotation> annotations = null,
+            bool isSetAssigned = false)
         {
-            _parentScopingDeclaration = parentScopingDeclaration;
-            _parentNonScopingDeclaration = parentNonScopingDeclaration;
-            _qualifiedName = qualifiedName;
-            _identifierName = identifierName;
-            _selection = selection;
-            _context = context;
-            _declaration = declaration;
-            _hasExplicitLetStatement = hasExplicitLetStatement;
-            _isAssignmentTarget = isAssignmentTarget;
-            _annotations = annotations ?? new List<IAnnotation>();
+            ParentScoping = parentScopingDeclaration;
+            ParentNonScoping = parentNonScopingDeclaration;
+            QualifiedModuleName = qualifiedName;
+            IdentifierName = identifierName;
+            Selection = selection;
+            Context = context;
+            Declaration = declaration;
+            HasExplicitLetStatement = hasExplicitLetStatement;
+            IsAssignment = isAssignmentTarget;
+            IsSetAssignment = isSetAssigned;
+            Annotations = annotations ?? new List<IAnnotation>();
         }
 
-        private readonly QualifiedModuleName _qualifiedName;
-        public QualifiedModuleName QualifiedModuleName { get { return _qualifiedName; } }
+        public QualifiedModuleName QualifiedModuleName { get; }
 
-        private readonly string _identifierName;
-        public string IdentifierName { get { return _identifierName; } }
+        public string IdentifierName { get; }
 
-        private readonly Selection _selection;
-        public Selection Selection { get { return _selection; } }
+        public Selection Selection { get; }
 
-        private readonly Declaration _parentScopingDeclaration;
         /// <summary>
         /// Gets the scoping <see cref="Declaration"/> that contains this identifier reference,
         /// e.g. a module, procedure, function or property.
         /// </summary>
-        public Declaration ParentScoping { get { return _parentScopingDeclaration; } }
+        public Declaration ParentScoping { get; }
 
-        private readonly Declaration _parentNonScopingDeclaration;
         /// <summary>
         /// Gets the non-scoping <see cref="Declaration"/> that contains this identifier reference,
         /// e.g. a user-defined or enum type. Gets the <see cref="ParentScoping"/> if not applicable.
         /// </summary>
-        public Declaration ParentNonScoping { get { return _parentNonScopingDeclaration; } }
+        public Declaration ParentNonScoping { get; }
 
-        private readonly bool _isAssignmentTarget;
-        public bool IsAssignment { get { return _isAssignmentTarget; } }
+        public bool IsAssignment { get; }
 
-        private readonly ParserRuleContext _context;
-        public ParserRuleContext Context { get { return _context; } }
+        public bool IsSetAssignment { get; }
 
-        private readonly Declaration _declaration;
-        public Declaration Declaration { get { return _declaration; } }
+        public ParserRuleContext Context { get; }
 
-        private readonly IEnumerable<IAnnotation> _annotations;
-        public IEnumerable<IAnnotation> Annotations { get { return _annotations; } }
+        public Declaration Declaration { get; }
 
-        public bool IsInspectionDisabled(string inspectionName)
-        {
-            return Annotations.Any(annotation =>
-                annotation.AnnotationType == AnnotationType.Ignore
-                && ((IgnoreAnnotation)annotation).IsIgnored(inspectionName));
-        }
+        public IEnumerable<IAnnotation> Annotations { get; }
 
-        private readonly bool _hasExplicitLetStatement;
-        public bool HasExplicitLetStatement { get { return _hasExplicitLetStatement; } }
+        public bool HasExplicitLetStatement { get; }
 
-        public bool HasExplicitCallStatement()
-        {
-            return Context.Parent is VBAParser.CallStmtContext && ((VBAParser.CallStmtContext)Context).CALL() != null;
-        }
+        public bool HasExplicitCallStatement() => Context.Parent is VBAParser.CallStmtContext && ((VBAParser.CallStmtContext)Context).CALL() != null;
 
         private bool? _hasTypeHint;
         public bool HasTypeHint()
@@ -94,8 +78,7 @@ namespace Rubberduck.Parsing.Symbols
                 return _hasTypeHint.Value;
             }
 
-            string token;
-            return HasTypeHint(out token);
+            return HasTypeHint(out _);
         }
 
         public bool HasTypeHint(out string token)
@@ -114,8 +97,11 @@ namespace Rubberduck.Parsing.Symbols
                 return false;
             }
 
-            var hint = ((dynamic)Context.Parent).typeHint() as VBAParser.TypeHintContext;
-            token = hint == null ? null : hint.GetText();
+            var hint = Context.Parent is VBAParser.TypedIdentifierContext typedIdentifierContext
+                ? typedIdentifierContext.typeHint()
+                : null;
+
+            token = hint?.GetText();
             _hasTypeHint = hint != null;
             return _hasTypeHint.Value;
         }

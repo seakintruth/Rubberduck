@@ -18,22 +18,12 @@ namespace Rubberduck.Parsing.Annotations
             _qualifiedName = qualifiedName;
         }
 
-        public IEnumerable<IAnnotation> Annotations
-        {
-            get
-            {
-                return _annotations;
-            }
-        }
+        public IEnumerable<IAnnotation> Annotations => _annotations;
 
         public override void ExitAnnotation([NotNull] VBAParser.AnnotationContext context)
         {
             var newAnnotation = _factory.Create(context, new QualifiedSelection(_qualifiedName, context.GetSelection()));
-            // It might be an annotation we don't support or a typo.
-            if (newAnnotation != null)
-            {
-                _annotations.Add(newAnnotation);
-            }
+            _annotations.Add(newAnnotation);
         }
     }
 }

@@ -1,22 +1,19 @@
 using System.Linq;
 using System.Threading;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using NUnit.Framework;
 using Moq;
-using Rubberduck.Inspections;
-using Rubberduck.Parsing.VBA;
-using Rubberduck.VBEditor.Application;
-using Rubberduck.VBEditor.Events;
+using Rubberduck.Inspections.Concrete;
 using Rubberduck.VBEditor.SafeComWrappers;
 using Rubberduck.VBEditor.SafeComWrappers.Abstract;
 using RubberduckTests.Mocks;
 
 namespace RubberduckTests.Inspections
 {
-    [TestClass]
+    [TestFixture]
     public class HostSpecificExpressionInspectionTests
     {
-        [TestMethod]
-        [TestCategory("Inspections")]
+        [Test]
+        [Category("Inspections")]
         public void ReturnsResultForExpressionOnLeftHandSide()
         {
             const string code = @"
@@ -27,21 +24,31 @@ End Sub
             var builder = new MockVbeBuilder();
             var project = builder.ProjectBuilder("TestProject", ProjectProtection.Unprotected)
                 .AddComponent("Module1", ComponentType.StandardModule, code)
-                .AddReference("Excel", MockVbeBuilder.LibraryPathMsExcel, 1, 7, true)
+                .AddReference("VBA", MockVbeBuilder.LibraryPathVBA, 4, 2, true)
+                .AddReference("Excel", MockVbeBuilder.LibraryPathMsExcel, 1, 8, true)
                 .Build();
             var vbe = builder.AddProject(project).Build();
             var mockHost = new Mock<IHostApplication>();
             mockHost.SetupGet(m => m.ApplicationName).Returns("Excel");
             vbe.Setup(m => m.HostApplication()).Returns(() => mockHost.Object);
 
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
+            using (var state = MockParser.CreateAndParse(vbe.Object))
+            {
+                var inspection = new HostSpecificExpressionInspection(state);
+                var inspectionResults = inspection.GetInspectionResults(CancellationToken.None);
 
-            var inspection = new HostSpecificExpressionInspection(parser.State);
-            var inspectionResults = inspection.GetInspectionResults();
+                Assert.AreEqual(1, inspectionResults.Count());
+            }
+        }
 
-            Assert.AreEqual(1, inspectionResults.Count());
+        [Test]
+        [Category("Inspections")]
+        public void InspectionName()
+        {
+            const string inspectionName = "HostSpecificExpressionInspection";
+            var inspection = new HostSpecificExpressionInspection(null);
+
+            Assert.AreEqual(inspectionName, inspection.Name);
         }
     }
 }

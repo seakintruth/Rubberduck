@@ -1,39 +1,53 @@
-﻿using Rubberduck.VBEditor;
+﻿using System;
+using Rubberduck.Parsing.Grammar;
+using Rubberduck.VBEditor;
 
 namespace Rubberduck.Parsing.Annotations
 {
     public abstract class AnnotationBase : IAnnotation
     {
-        private readonly AnnotationType _annotationType;
-        private readonly QualifiedSelection _qualifiedSelection;
+        public const string ANNOTATION_MARKER = "@";
 
-        public const string ANNOTATION_MARKER = "'@";
+        private readonly Lazy<int?> _annotatedLine;
 
-        public AnnotationBase(AnnotationType annotationType, QualifiedSelection qualifiedSelection)
+        protected AnnotationBase(AnnotationType annotationType, QualifiedSelection qualifiedSelection, VBAParser.AnnotationContext context)
         {
-            _annotationType = annotationType;
-            _qualifiedSelection = qualifiedSelection;
+            AnnotationType = annotationType;
+            QualifiedSelection = qualifiedSelection;
+            Context = context;
+            _annotatedLine = new Lazy<int?>(GetAnnotatedLine);
         }
 
-        public AnnotationType AnnotationType
+        public AnnotationType AnnotationType { get; }
+        public QualifiedSelection QualifiedSelection { get; }
+        public VBAParser.AnnotationContext Context { get; }
+
+        public int? AnnotatedLine => _annotatedLine.Value;
+
+        public virtual bool AllowMultiple { get; } = false;
+
+        public override string ToString() => $"Annotation Type: {AnnotationType}";
+
+
+        private int? GetAnnotatedLine()
         {
-            get
+            var enclosingEndOfStatement = Context.GetAncestor<VBAParser.EndOfStatementContext>();
+
+            //Annotations on the same line as non-whitespace statements do not scope to anything.
+            if (enclosingEndOfStatement.Start.TokenIndex != 0)
             {
-                return _annotationType;
+                var firstEndOfLine = enclosingEndOfStatement.GetFirstEndOfLine();
+                var parentEndOfLine = Context.GetAncestor<VBAParser.EndOfLineContext>();
+                if (firstEndOfLine.Equals(parentEndOfLine))
+                {
+                    return null;
+                }
             }
-        }
 
-        public QualifiedSelection QualifiedSelection
-        {
-            get
-            {
-                return _qualifiedSelection;
-            }
-        }
-
-        public override string ToString()
-        {
-            return string.Format("Annotation Type: {0}", _annotationType);
+            var lastToken = enclosingEndOfStatement.stop;
+            return lastToken.Type == VBAParser.NEWLINE 
+                   ? lastToken.Line + 1
+                   : lastToken.Line;
         }
     }
 }

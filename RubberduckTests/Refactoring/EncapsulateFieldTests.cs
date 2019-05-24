@@ -1,35 +1,37 @@
-using System.Threading;
-using System.Windows.Forms;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
+using NUnit.Framework;
 using Moq;
-using Rubberduck.Common;
-using Rubberduck.Parsing.VBA;
+using Rubberduck.Parsing.Rewriter;
+using Rubberduck.Parsing.Symbols;
 using Rubberduck.Refactorings;
 using Rubberduck.Refactorings.EncapsulateField;
 using Rubberduck.VBEditor;
 using RubberduckTests.Mocks;
 using Rubberduck.SmartIndenter;
-using Rubberduck.VBEditor.Application;
-using Rubberduck.VBEditor.Events;
 using Rubberduck.VBEditor.SafeComWrappers;
 using Rubberduck.VBEditor.SafeComWrappers.Abstract;
+using Rubberduck.Parsing.VBA;
+using Rubberduck.Refactorings.Exceptions;
+using Rubberduck.VBEditor.Utility;
 
 namespace RubberduckTests.Refactoring
 {
-    [TestClass]
-    public class EncapsulateFieldTests
+    [TestFixture]
+    public class EncapsulateFieldTests : InteractiveRefactoringTestBase<IEncapsulateFieldPresenter, EncapsulateFieldModel>
     {
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_WithLetter()
         {
             //Input
             const string inputCode =
-@"Public fizz As Integer";
-            var selection = new Selection(1, 1, 1, 1);
+                @"Public fizz As Integer";
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -39,56 +41,57 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
+        public void EncapsulatePublicField_InvalidDeclarationType_Throws()
+        {
+            //Input
+            const string inputCode =
+                @"Public fizz As Integer";
+
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, "TestModule1", DeclarationType.ProceduralModule, presenterAction, typeof(InvalidDeclarationTypeException));
+            Assert.AreEqual(inputCode, actualCode);
+        }
+
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
+        public void EncapsulatePublicField_InvalidIdentifierSelected_Throws()
+        {
+            //Input
+            const string inputCode =
+                @"Public Function fizz() As Integer
+End Function";
+            var selection = new Selection(1, 19);
+
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction, typeof(NoDeclarationForSelectionException));
+            Assert.AreEqual(inputCode, actualCode);
+        }
+
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_FieldIsOverMultipleLines()
         {
             //Input
             const string inputCode =
-@"Public _
+                @"Public _
 fizz _
 As _
 Integer";
-            var selection = new Selection(1, 1, 1, 1);
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -98,53 +101,24 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_WithSetter()
         {
             //Input
             const string inputCode =
-@"Public fizz As Variant";
-            var selection = new Selection(1, 1, 1, 1);
+                @"Public fizz As Variant";
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Variant
+                @"Private fizz As Variant
 
 Public Property Get Name() As Variant
     Set Name = fizz
@@ -154,100 +128,42 @@ Public Property Set Name(ByVal value As Variant)
     Set fizz = value
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = false,
-                ImplementSetSetterType = true,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementSet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_WithOnlyGetter()
         {
             //Input
             const string inputCode =
-@"Public fizz As Variant";
-            var selection = new Selection(1, 1, 1, 1);
+                @"Public fizz As Variant";
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Variant
+                @"Private fizz As Variant
 
 Public Property Get Name() As Variant
     Name = fizz
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = false,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name");
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_OtherMethodsInClass()
         {
             //Input
             const string inputCode =
-@"Public fizz As Integer
+                @"Public fizz As Integer
 
 Sub Foo()
 End Sub
@@ -255,11 +171,11 @@ End Sub
 Function Bar() As Integer
     Bar = 0
 End Function";
-            var selection = new Selection(1, 1, 1, 1);
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -269,54 +185,26 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 
+
 Sub Foo()
 End Sub
 
 Function Bar() As Integer
     Bar = 0
 End Function";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_OtherPropertiesInClass()
         {
             //Input
             const string inputCode =
-@"Public fizz As Integer
+                @"Public fizz As Integer
 
 Property Get Foo() As Variant
     Foo = True
@@ -327,11 +215,11 @@ End Property
 
 Property Set Foo(ByVal vall As Variant)
 End Property";
-            var selection = new Selection(1, 1, 1, 1);
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -341,6 +229,7 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 
+
 Property Get Foo() As Variant
     Foo = True
 End Property
@@ -351,53 +240,25 @@ End Property
 Property Set Foo(ByVal vall As Variant)
 End Property";
 
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_OtherFieldsInClass()
         {
             //Input
             const string inputCode =
-@"Public fizz As Integer
+                @"Public fizz As Integer
 Public buzz As Boolean";
-            var selection = new Selection(1, 1, 1, 1);
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Public buzz As Boolean
+                @"Public buzz As Boolean
 Private fizz As Integer
 
 Public Property Get Name() As Integer
@@ -408,59 +269,35 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_FieldDeclarationHasMultipleFields_MoveFirst()
         {
             //Input
             const string inputCode =
-@"Public fizz, _
+                @"Public fizz, _
          buzz As Boolean, _
          bazz As Date";
-            var selection = new Selection(1, 12, 1, 12);
+            var selection = new Selection(1, 12);
 
             //Expectation
             const string expectedCode =
-@"Public          buzz As Boolean,         bazz As Date
+                @"Public buzz As Boolean, _
+         bazz As Date
 Private fizz As Variant
 
 Public Property Get Name() As Variant
-    Set Name = fizz
+    If IsObject(fizz) Then
+        Set Name = fizz
+    Else
+        Name = fizz
+    End If
 End Property
 
 Public Property Let Name(ByVal value As Variant)
@@ -470,56 +307,28 @@ End Property
 Public Property Set Name(ByVal value As Variant)
     Set fizz = value
 End Property
-";   // note: VBE removes excess spaces
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = true,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+";
+            var presenterAction = SetParameters("Name", implementSet: true, implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_FieldDeclarationHasMultipleFields_MoveSecond()
         {
             //Input
             const string inputCode =
-@"Public fizz, _
-         buzz As Boolean, _
-         bazz As Date";
-            var selection = new Selection(2, 12, 2, 12);
+                @"Public fizz, _
+buzz As Boolean, _
+bazz As Date";
+            var selection = new Selection(2, 12);
 
             //Expectation
             const string expectedCode =
-@"Public fizz,                  bazz As Date
+                @"Public fizz, _
+bazz As Date
 Private buzz As Boolean
 
 Public Property Get Name() As Boolean
@@ -529,56 +338,28 @@ End Property
 Public Property Let Name(ByVal value As Boolean)
     buzz = value
 End Property
-";   // note: VBE removes excess spaces
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+";
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_FieldDeclarationHasMultipleFields_MoveLast()
         {
             //Input
             const string inputCode =
-@"Public fizz, _
-         buzz As Boolean, _
-         bazz As Date";
-            var selection = new Selection(3, 12, 3, 12);
+                @"Public fizz, _
+buzz As Boolean, _
+bazz As Date";
+            var selection = new Selection(3, 12);
 
             //Expectation
             const string expectedCode =
-@"Public fizz,         buzz As Boolean         
+                @"Public fizz, _
+buzz As Boolean
 Private bazz As Date
 
 Public Property Get Name() As Date
@@ -588,54 +369,25 @@ End Property
 Public Property Let Name(ByVal value As Date)
     bazz = value
 End Property
-";   // note: VBE removes excess spaces
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+";
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePrivateField()
         {
             //Input
             const string inputCode =
-@"Private fizz As Integer";
-            var selection = new Selection(1, 1, 1, 1);
+                @"Private fizz As Integer";
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -645,48 +397,19 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_FieldHasReferences()
         {
             //Input
             const string inputCode =
-@"Public fizz As Integer
+                @"Public fizz As Integer
 
 Sub Foo()
     fizz = 0
@@ -695,11 +418,11 @@ End Sub
 
 Sub Bar(ByVal name As Integer)
 End Sub";
-            var selection = new Selection(1, 1, 1, 1);
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -708,6 +431,7 @@ End Property
 Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
+
 
 Sub Foo()
     Name = 0
@@ -716,54 +440,25 @@ End Sub
 
 Sub Bar(ByVal name As Integer)
 End Sub";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void GivenReferencedPublicField_UpdatesReferenceToNewProperty()
         {
             //Input
             const string codeClass1 =
-@"Public fizz As Integer
+                @"Public fizz As Integer
 
 Sub Foo()
     fizz = 1
 End Sub";
             const string codeClass2 =
-@"Sub Foo()
+                @"Sub Foo()
     Dim c As Class1
     c.fizz = 0
     Bar c.fizz
@@ -772,11 +467,11 @@ End Sub
 Sub Bar(ByVal v As Integer)
 End Sub";
 
-            var selection = new Selection(1, 1, 1, 1);
+            var selection = new Selection(1, 1);
 
             //Expectation
             const string expectedCode1 =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -786,12 +481,13 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 
+
 Sub Foo()
     Name = 1
 End Sub";
 
             const string expectedCode2 =
-@"Sub Foo()
+                @"Sub Foo()
     Dim c As Class1
     c.Name = 0
     Bar c.Name
@@ -800,63 +496,31 @@ End Sub
 Sub Bar(ByVal v As Integer)
 End Sub";
 
-            //Arrange
-            var builder = new MockVbeBuilder();
-            var project = builder.ProjectBuilder("TestProject1", ProjectProtection.Unprotected)
-                .AddComponent("Class1", ComponentType.ClassModule, codeClass1)
-                .AddComponent("Class2", ComponentType.ClassModule, codeClass2)
-                .Build();
-            var vbe = builder.AddProject(project).Build();
-            var component = project.Object.VBComponents[0];
-            vbe.Setup(v => v.ActiveCodePane).Returns(component.CodeModule.CodePane);
-
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var module1 = project.Object.VBComponents[0].CodeModule;
-            var module2 = project.Object.VBComponents[1].CodeModule;
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            var actualCode1 = module1.Content();
-            var actualCode2 = module2.Content();
-
-            //Assert
-            Assert.AreEqual(expectedCode1, actualCode1);
-            Assert.AreEqual(expectedCode2, actualCode2);
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(
+                "Class1", 
+                selection, 
+                presenterAction, 
+                null, 
+                false, 
+                ("Class1", codeClass1, ComponentType.ClassModule),
+                ("Class2", codeClass2, ComponentType.ClassModule));
+            Assert.AreEqual(expectedCode1, actualCode["Class1"]);
+            Assert.AreEqual(expectedCode2, actualCode["Class2"]);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulatePublicField_PassInTarget()
         {
             //Input
             const string inputCode =
-@"Private fizz As Integer";
-            var selection = new Selection(1, 1, 1, 1);
+                @"Private fizz As Integer";
 
             //Expectation
             const string expectedCode =
-@"Private fizz As Integer
+                @"Private fizz As Integer
 
 Public Property Get Name() As Integer
     Name = fizz
@@ -866,772 +530,145 @@ Public Property Let Name(ByVal value As Integer)
     fizz = value
 End Property
 ";
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var project = vbe.Object.VBProjects[0];
-            var module = project.VBComponents[0].CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            var model = new EncapsulateFieldModel(parser.State, qualifiedSelection)
-            {
-                ImplementLetSetterType = true,
-                ImplementSetSetterType = false,
-                CanImplementLet = true,
-                ParameterName = "value",
-                PropertyName = "Name"
-            };
-
-            //SetupFactory
-            var factory = SetupFactory(model);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(parser.State.AllUserDeclarations.FindVariable(qualifiedSelection));
-
-            //Assert
-            Assert.AreEqual(expectedCode, module.Content());
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, "fizz", DeclarationType.Variable, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulateField_PresenterIsNull()
         {
             //Input
             const string inputCode =
-@"Private fizz As Variant";
+                @"Private fizz As Variant";
+            
+            var vbe = MockVbeBuilder.BuildFromSingleStandardModule(inputCode, out var component);
+            var (state, rewritingManager) = MockParser.CreateAndParseWithRewritingManager(vbe.Object);
+            using(state)
+            {
+                var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), Selection.Home);
+                var selectionService = MockedSelectionService();
+                var factory = new Mock<IRefactoringPresenterFactory>();
+                factory.Setup(f => f.Create<IEncapsulateFieldPresenter, EncapsulateFieldModel>(It.IsAny<EncapsulateFieldModel>()))
+                    .Returns(() => null); // resolves ambiguous method overload
 
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component);
-            var module = component.CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
+                var refactoring = TestRefactoring(rewritingManager, state, factory.Object, selectionService);
 
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
+                Assert.Throws<InvalidRefactoringPresenterException>(() => refactoring.Refactor(qualifiedSelection));
 
-            var vbeWrapper = vbe.Object;
-            var factory = new EncapsulateFieldPresenterFactory(vbeWrapper, parser.State, null);
-
-            //act
-            var refactoring = new EncapsulateFieldRefactoring(vbeWrapper, CreateIndenter(vbe.Object), factory);
-            refactoring.Refactor();
-
-            Assert.AreEqual(inputCode, module.Content());
+                var actualCode = component.CodeModule.Content();
+                Assert.AreEqual(inputCode, actualCode);
+            }
         }
 
-        [TestMethod]
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
         public void EncapsulateField_ModelIsNull()
         {
             //Input
             const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 1, 1, 1);
+                @"Private fizz As Variant";
+            var selection = new Selection(1, 1);
 
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var module = component.CodeModule;
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var qualifiedSelection = new QualifiedSelection(new QualifiedModuleName(component), selection);
-
-            //SetupFactory
-            var factory = SetupFactory(null);
-
-            //Act
-            var refactoring = new EncapsulateFieldRefactoring(vbe.Object, CreateIndenter(vbe.Object), factory.Object);
-            refactoring.Refactor(qualifiedSelection);
-
-            //Assert
-            Assert.AreEqual(inputCode, module.Content());
+            Func<EncapsulateFieldModel, EncapsulateFieldModel> presenterAction = model => null;
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction, typeof(InvalidRefactoringModelException));
+            Assert.AreEqual(inputCode, actualCode);
         }
 
-        [TestMethod]
-        public void GivenNullActiveCodePane_FactoryReturnsNullPresenter()
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
+        public void EncapsulatePublicField_OptionExplicit_NotMoved()
         {
             //Input
             const string inputCode =
-@"Private fizz As Integer";
+                @"Option Explicit
 
-            //Arrange
-            var builder = new MockVbeBuilder();
-            var projectBuilder = builder.ProjectBuilder("TestProject1", ProjectProtection.Unprotected);
-            projectBuilder.AddComponent("Module1", ComponentType.StandardModule, inputCode);
-            var project = projectBuilder.Build();
-            builder.AddProject(project);
-            var vbe = builder.Build();
+Public foo As String";
 
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
+            //Expectation
+            const string expectedCode =
+                @"Option Explicit
 
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
+Private foo As String
 
-            vbe.Object.ActiveCodePane = null;
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, null);
-            var actual = factory.Create();
+Public Property Get Name() As String
+    Name = foo
+End Property
 
-            Assert.IsNull(actual);
+Public Property Let Name(ByVal value As String)
+    foo = value
+End Property
+";
+            var presenterAction = SetParameters("Name", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, "foo", DeclarationType.Variable, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
-        [TestMethod]
-        public void Presenter_ParameterlessTargetReturnsNullModel()
+        [Test]
+        [Category("Refactorings")]
+        [Category("Encapsulate Field")]
+        public void Refactoring_Puts_Code_In_Correct_Place()
         {
             //Input
             const string inputCode =
-@"Private Sub Foo()
-End Sub";
-            var selection = new Selection(1, 15, 1, 15);
+                @"Option Explicit
 
-            //Arrange
-            var builder = new MockVbeBuilder();
-            var projectBuilder = builder.ProjectBuilder("TestProject1", ProjectProtection.Unprotected);
-            projectBuilder.AddComponent("Module1", ComponentType.StandardModule, inputCode, selection);
-            var project = projectBuilder.Build();
-            builder.AddProject(project);
-            var vbe = builder.Build();
+Public Foo As String";
 
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
+            var selection = new Selection(3, 8, 3, 11);
 
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
+            //Output
+            const string expectedCode =
+                @"Option Explicit
 
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, null);
-            var presenter = factory.Create();
+Private Foo As String
 
-            Assert.AreEqual(null, presenter.Show());
-        }
+Public Property Get bar() As String
+    bar = Foo
+End Property
 
-        [TestMethod]
-        public void Presenter_NullTargetReturnsNullModel()
-        {
-            //Input
-            const string inputCode =
-@"
-Private Sub Foo(ByVal arg1 As Integer, ByVal arg2 As String)
-End Sub";
-            var selection = Selection.Home;
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            var projectBuilder = builder.ProjectBuilder("TestProject1", ProjectProtection.Unprotected);
-            projectBuilder.AddComponent("Module1", ComponentType.StandardModule, inputCode, selection);
-            var project = projectBuilder.Build();
-            builder.AddProject(project);
-            var vbe = builder.Build();
-
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var codePane = project.Object.VBComponents[0].CodeModule.CodePane;
-            codePane.Selection = selection;
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, null);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual(null, presenter.Show());
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithParameterNameChanged()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-            view.SetupProperty(v => v.ParameterName, "myVal");
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual("myVal", presenter.Show().ParameterName);
-        }
-
-        [TestMethod]
-        public void Presenter_Reject_ReturnsNull()
-        {
-            //Input
-            const string inputCode =
-@"Private Sub Foo(ByVal arg1 As Integer, ByVal arg2 As String)
-End Sub";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.Cancel);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual(null, presenter.Show());
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithPropertyNameChanged()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.Setup(v => v.NewPropertyName).Returns("MyProperty");
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual("MyProperty", presenter.Show().PropertyName);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithCanImplementLetChanged()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementLetSetterType, true);
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual(true, presenter.Show().CanImplementLet);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementLetChanged()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.MustImplementLetSetterType, true);
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual(true, presenter.Show().ImplementLetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementSetChanged()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.MustImplementSetSetterType, true);
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-
-            var presenter = factory.Create();
-
-            Assert.AreEqual(true, presenter.Show().ImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementLetAllowedForPrimitiveTypes_NoReferences()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Boolean";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementLetSetterType, true);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.CanImplementLetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementSetNotAllowedForPrimitiveTypes_NoReferences()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Boolean";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementSetSetterType, true);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(false, view.Object.CanImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementSetAllowedForNonVariantNonPrimitiveTypes_NoReferences()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Icon";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementSetSetterType, true);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.CanImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementLetNotAllowedForNonVariantNonPrimitiveType_NoReferences()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Icon";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementLetSetterType, true);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(false, view.Object.CanImplementLetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementLetAllowedForVariant_NoReferences()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementLetSetterType, true);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.CanImplementLetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementSetAllowedForVariant_NoReferences()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.CanImplementSetSetterType, true);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.CanImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementLetRequiredForPrimitiveTypes_References()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Boolean
-Sub foo()
-    fizz = True
-End Sub";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.MustImplementLetSetterType, false);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.MustImplementLetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementSetRequiredForNonVariantNonPrimitiveTypes_References()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Class1
-Sub foo()
-    Set fizz = New Class1
-End Sub";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.MustImplementSetSetterType, false);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.MustImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementLetRequiredForNonSetVariant_References()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant
-Sub Foo()
-    fizz = True
-End Sub";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.MustImplementLetSetterType, false);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.MustImplementLetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_ReturnsModelWithImplementSetRequiredForSetVariant_References()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant
-Sub foo()
-    Set fizz = New Class1
-End Sub";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.SetupProperty(v => v.MustImplementSetSetterType, false);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            factory.Create().Show();
-
-            Assert.AreEqual(true, view.Object.MustImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_DefaultCreateGetOnly_PrimitiveType_NoReference()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Date";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            var model = factory.Create().Show();
-
-            Assert.AreEqual(false, model.ImplementLetSetterType);
-            Assert.AreEqual(false, model.ImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_DefaultCreateGetOnly_NonPrimitiveTypeNonVariant_NoReference()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Icon";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            var model = factory.Create().Show();
-
-            Assert.AreEqual(false, model.ImplementLetSetterType);
-            Assert.AreEqual(false, model.ImplementSetSetterType);
-        }
-
-        [TestMethod]
-        public void Presenter_Accept_DefaultCreateGetOnly_Variant_NoReference()
-        {
-            //Input
-            const string inputCode =
-@"Private fizz As Variant";
-            var selection = new Selection(1, 15, 1, 15);
-
-            //Arrange
-            var builder = new MockVbeBuilder();
-            IVBComponent component;
-            var vbe = builder.BuildFromSingleStandardModule(inputCode, out component, selection);
-            var mockHost = new Mock<IHostApplication>();
-            mockHost.SetupAllProperties();
-            var parser = MockParser.Create(vbe.Object, new RubberduckParserState(new Mock<ISinks>().Object));
-
-            parser.Parse(new CancellationTokenSource());
-            if (parser.State.Status >= ParserState.Error) { Assert.Inconclusive("Parser Error"); }
-
-            var view = new Mock<IEncapsulateFieldDialog>();
-            view.Setup(v => v.ShowDialog()).Returns(DialogResult.OK);
-
-            var factory = new EncapsulateFieldPresenterFactory(vbe.Object, parser.State, view.Object);
-            var model = factory.Create().Show();
-
-            Assert.AreEqual(false, model.ImplementLetSetterType);
-            Assert.AreEqual(false, model.ImplementSetSetterType);
+Public Property Let bar(ByVal value As String)
+    Foo = value
+End Property
+";
+            var presenterAction = SetParameters("bar", implementLet: true);
+            var actualCode = RefactoredCode(inputCode, selection, presenterAction);
+            Assert.AreEqual(expectedCode, actualCode);
         }
 
         #region setup
-        private static Mock<IRefactoringPresenterFactory<IEncapsulateFieldPresenter>> SetupFactory(EncapsulateFieldModel model)
-        {
-            var presenter = new Mock<IEncapsulateFieldPresenter>();
-            presenter.Setup(p => p.Show()).Returns(model);
 
-            var factory = new Mock<IRefactoringPresenterFactory<IEncapsulateFieldPresenter>>();
-            factory.Setup(f => f.Create()).Returns(presenter.Object);
-            return factory;
+        private Func<EncapsulateFieldModel, EncapsulateFieldModel> SetParameters(
+            string propertyName,
+            bool implementSet = false, 
+            bool implementLet = false, 
+            string parameterName = "value")
+        {
+            return model =>
+            {
+                model.PropertyName = propertyName;
+                model.ParameterName = parameterName;
+                model.ImplementLetSetterType = implementLet;
+                model.ImplementSetSetterType = implementSet;
+                return model;
+            };
         }
 
-        private static IIndenter CreateIndenter(IVBE vbe)
+        private static IIndenter CreateIndenter(IVBE vbe = null)
         {
             return new Indenter(vbe, () => Settings.IndenterSettingsTests.GetMockIndenterSettings());
         }
+
+        protected override IRefactoring TestRefactoring(IRewritingManager rewritingManager, RubberduckParserState state, IRefactoringPresenterFactory factory, ISelectionService selectionService)
+        {
+            var indenter = CreateIndenter(); //The refactoring only uses method independent of the VBE instance.
+            return new EncapsulateFieldRefactoring(state, indenter, factory, rewritingManager, selectionService);
+        }
+
         #endregion
     }
 }

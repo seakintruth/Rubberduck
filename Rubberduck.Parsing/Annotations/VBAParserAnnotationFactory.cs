@@ -19,22 +19,32 @@ namespace Rubberduck.Parsing.Annotations
             _creators.Add(AnnotationType.TestInitialize.ToString().ToUpperInvariant(), typeof(TestInitializeAnnotation));
             _creators.Add(AnnotationType.TestCleanup.ToString().ToUpperInvariant(), typeof(TestCleanupAnnotation));
             _creators.Add(AnnotationType.Ignore.ToString().ToUpperInvariant(), typeof(IgnoreAnnotation));
+            _creators.Add(AnnotationType.IgnoreModule.ToString().ToUpperInvariant(), typeof(IgnoreModuleAnnotation));
             _creators.Add(AnnotationType.IgnoreTest.ToString().ToUpperInvariant(), typeof(IgnoreTestAnnotation));
             _creators.Add(AnnotationType.Folder.ToString().ToUpperInvariant(), typeof(FolderAnnotation));
             _creators.Add(AnnotationType.NoIndent.ToString().ToUpperInvariant(), typeof(NoIndentAnnotation));
             _creators.Add(AnnotationType.Interface.ToString().ToUpperInvariant(), typeof(InterfaceAnnotation));
+            _creators.Add(AnnotationType.Description.ToString().ToUpperInvariant(), typeof (DescriptionAnnotation));
+            _creators.Add(AnnotationType.PredeclaredId.ToString().ToUpperInvariant(), typeof(PredeclaredIdAnnotation));
+            _creators.Add(AnnotationType.DefaultMember.ToString().ToUpperInvariant(), typeof(DefaultMemberAnnotation));
+            _creators.Add(AnnotationType.Enumerator.ToString().ToUpperInvariant(), typeof(EnumeratorMemberAnnotation));
+            _creators.Add(AnnotationType.Exposed.ToString().ToUpperInvariant(), typeof (ExposedModuleAnnotation));
+            _creators.Add(AnnotationType.Obsolete.ToString().ToUpperInvariant(), typeof(ObsoleteAnnotation));
+            _creators.Add(AnnotationType.ModuleAttribute.ToString().ToUpperInvariant(), typeof(ModuleAttributeAnnotation));
+            _creators.Add(AnnotationType.MemberAttribute.ToString().ToUpperInvariant(), typeof(MemberAttributeAnnotation));
+            _creators.Add(AnnotationType.ModuleDescription.ToString().ToUpperInvariant(), typeof(ModuleDescriptionAnnotation));
         }
 
         public IAnnotation Create(VBAParser.AnnotationContext context, QualifiedSelection qualifiedSelection)
         {
-            string annotationName = context.annotationName().GetText();
-            List<string> parameters = AnnotationParametersFromContext(context);
-            return CreateAnnotation(annotationName, parameters, qualifiedSelection);
+            var annotationName = context.annotationName().GetText();
+            var parameters = AnnotationParametersFromContext(context);
+            return CreateAnnotation(annotationName, parameters, qualifiedSelection, context);
         }
 
             private static List<string> AnnotationParametersFromContext(VBAParser.AnnotationContext context)
             {
-                List<string> parameters = new List<string>();
+                var parameters = new List<string>();
                 var argList = context.annotationArgList();
                 if (argList != null)
                 {
@@ -43,14 +53,15 @@ namespace Rubberduck.Parsing.Annotations
                 return parameters;
             }
 
-            private IAnnotation CreateAnnotation(string annotationName, List<string> parameters, QualifiedSelection qualifiedSelection)
+        private IAnnotation CreateAnnotation(string annotationName, IReadOnlyList<string> parameters,
+            QualifiedSelection qualifiedSelection, VBAParser.AnnotationContext context)
+        {
+            if (_creators.TryGetValue(annotationName.ToUpperInvariant(), out var annotationClrType))
             {
-                Type annotationCLRType = null;
-                if (_creators.TryGetValue(annotationName.ToUpperInvariant(), out annotationCLRType))
-                {
-                    return (IAnnotation)Activator.CreateInstance(annotationCLRType, qualifiedSelection, parameters);
-                }
-                return null;
+                return (IAnnotation) Activator.CreateInstance(annotationClrType, qualifiedSelection, context, parameters);
             }
+
+            return new NotRecognizedAnnotation(qualifiedSelection, context, parameters);
+        }
     }
 }

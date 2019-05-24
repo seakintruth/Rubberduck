@@ -1,4 +1,5 @@
-﻿using Rubberduck.Parsing.ComReflection;
+﻿using System;
+using Rubberduck.Parsing.ComReflection;
 using Rubberduck.VBEditor;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,14 +7,14 @@ using Rubberduck.VBEditor.SafeComWrappers.Abstract;
 
 namespace Rubberduck.Parsing.Symbols
 {
-    public sealed class ProjectDeclaration : Declaration
+    public sealed class ProjectDeclaration : Declaration, IDisposable
     {
         private readonly List<ProjectReference> _projectReferences;
 
         public ProjectDeclaration(
             QualifiedMemberName qualifiedName,
             string name,
-            bool isBuiltIn,
+            bool isUserDefined,
             IVBProject project)
             : base(
                   qualifiedName,
@@ -26,24 +27,27 @@ namespace Rubberduck.Parsing.Symbols
                   Accessibility.Implicit,
                   DeclarationType.Project,
                   null,
+                  null,
                   Selection.Home,
                   false,
                   null,
-                  isBuiltIn)
+                  isUserDefined)
         {
             _project = project;
             _projectReferences = new List<ProjectReference>();
         }
 
         public ProjectDeclaration(ComProject project, QualifiedModuleName module)
-            : this(module.QualifyMemberName(project.Name), project.Name, true, null)
+            : this(module.QualifyMemberName(project.Name), project.Name, false, null)
         {
+            Guid = project.Guid;
             MajorVersion = project.MajorVersion;
             MinorVersion = project.MinorVersion;
         }
 
-        public long MajorVersion { get; set; }
-        public long MinorVersion { get; set; }
+        public Guid Guid { get; }
+        public long MajorVersion { get; }
+        public long MinorVersion { get; }
 
         public IReadOnlyList<ProjectReference> ProjectReferences
         {
@@ -60,7 +64,7 @@ namespace Rubberduck.Parsing.Symbols
         /// <remarks>
         /// This property is intended to differenciate identically-named VBProjects.
         /// </remarks>
-        public override IVBProject Project { get { return _project; } }
+        public override IVBProject Project => IsDisposed ? null : _project;
 
         public void AddProjectReference(string referencedProjectId, int priority)
         {
@@ -69,6 +73,37 @@ namespace Rubberduck.Parsing.Symbols
                 return;
             }
             _projectReferences.Add(new ProjectReference(referencedProjectId, priority));
+        }
+
+        public void ClearProjectReferences()
+        {
+            _projectReferences.Clear();
+        }
+
+        private string _displayName;
+        /// <summary>
+        /// WARNING: This property has side effects. It changes the ActiveVBProject, which causes a flicker in the VBE.
+        /// This should only be called if it is *absolutely* necessary.
+        /// </summary>
+        public override string ProjectDisplayName
+        {
+            get
+            {
+                if (_displayName != null)
+                {
+                    return _displayName;
+                }
+                _displayName = !IsDisposed && _project != null ? _project.ProjectDisplayName : string.Empty;
+                return _displayName;
+            }
+        }
+
+
+        public bool IsDisposed { get; private set; }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
         }
     }
 }
